@@ -1,3 +1,4 @@
+import csv
 import logging
 from datetime import datetime
 from openpyxl import Workbook
@@ -57,4 +58,13 @@ def export_to_excel(startups: list[dict], region: str = "liguria", output_dir: s
     filename = f"{output_dir}/startup_{region_slug}_{today}.xlsx"
     wb.save(filename)
     logger.info(f"File Excel salvato: {filename} ({len(startups)} startup)")
+
+    # CSV
+    csv_filename = filename.replace(".xlsx", ".csv")
+    with open(csv_filename, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=all_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(startups)
+    logger.info(f"File CSV salvato: {csv_filename}")
+
     return filename
