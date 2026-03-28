@@ -67,11 +67,17 @@ Alla prima esecuzione è quasi certo che venga chiesto; le esecuzioni successive
 
 ## Output
 
-Lo script genera un file Excel nella directory corrente (o in quella specificata con `--output`):
+Lo script genera due file nella directory corrente (o in quella specificata con `--output`):
 
+- **`.xlsx`** (Excel formattato con header blu, colonne auto-sized)
+- **`.csv`** (UTF-8 con BOM, apribile in Excel su Windows)
+
+Esempi di nomi file:
 ```
 startup_liguria_20260328.xlsx
+startup_liguria_20260328.csv
 startup_lombardia_20260328.xlsx
+startup_lombardia_20260328.csv
 ...
 ```
 
