@@ -11,12 +11,42 @@ logger = logging.getLogger(__name__)
 COOKIES_FILE = "cookies.json"
 BASE_URL = "https://startup.registroimprese.it"
 SEARCH_URL = f"{BASE_URL}/isin/search"
-LIGURIA_VALUE = "7"  # data-value for Liguria in region dropdown
+
+# Mapping region name (lowercase) → site data-value (0-based alphabetical index)
+REGIONI: dict[str, str] = {
+    "abruzzo": "0",
+    "basilicata": "1",
+    "calabria": "2",
+    "campania": "3",
+    "emilia-romagna": "4",
+    "friuli-venezia giulia": "5",
+    "lazio": "6",
+    "liguria": "7",
+    "lombardia": "8",
+    "marche": "9",
+    "molise": "10",
+    "piemonte": "11",
+    "puglia": "12",
+    "sardegna": "13",
+    "sicilia": "14",
+    "toscana": "15",
+    "trentino-alto adige": "16",
+    "umbria": "17",
+    "valle d'aosta": "18",
+    "veneto": "19",
+}
 
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 
-def _random_delay(min_sec=1.0, max_sec=3.0):
+# Rate-limiting defaults (seconds) — be polite to the server
+DELAY_MIN = 2.0
+DELAY_MAX = 4.0
+DELAY_PAGE_MIN = 4.0
+DELAY_PAGE_MAX = 7.0
+
+
+def _random_delay(min_sec=DELAY_MIN, max_sec=DELAY_MAX):
     time.sleep(random.uniform(min_sec, max_sec))
 
 
@@ -81,7 +111,7 @@ def _dismiss_overlays(page: Page):
     """)
 
 
-def _setup_filters_and_search(page: Page):
+def _setup_filters_and_search(page: Page, region_value: str = "7"):
     """Configura filtri e avvia ricerca. Usa selettori stabili (name attr, non ID)."""
     logger.info("Configurazione filtri...")
 
@@ -99,20 +129,20 @@ def _setup_filters_and_search(page: Page):
     """)
     _random_delay(1, 2)
 
-    # 2. Select Liguria - use name attribute for hidden input + Semantic UI dropdown
-    logger.info("Seleziono regione Liguria...")
-    page.evaluate("""
+    # 2. Select region - use name attribute for hidden input + Semantic UI dropdown
+    logger.info(f"Seleziono regione (value={region_value})...")
+    page.evaluate(f"""
         // Find the region hidden input by name (stable)
         var input = document.querySelector('input[name="regionFld:contenitore:supplierSel"]');
-        if (input) {
-            input.value = '7';
+        if (input) {{
+            input.value = '{region_value}';
             // Find the parent Semantic UI dropdown and use its API
             var dropdown = input.closest('.ui.dropdown');
-            if (dropdown && typeof $ !== 'undefined') {
-                $(dropdown).dropdown('set selected', '7');
-            }
-            input.dispatchEvent(new Event('change', {bubbles: true}));
-        }
+            if (dropdown && typeof $ !== 'undefined') {{
+                $(dropdown).dropdown('set selected', '{region_value}');
+            }}
+            input.dispatchEvent(new Event('change', {{bubbles: true}}));
+        }}
     """)
     _random_delay(2, 3)
 
@@ -147,11 +177,11 @@ def _setup_filters_and_search(page: Page):
     """)
 
     # Wait for results to load via AJAX
-    _random_delay(3, 5)
+    _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
     try:
         page.wait_for_load_state("networkidle", timeout=30000)
     except Exception:
-        _random_delay(2, 3)
+        _random_delay(3, 5)
 
 
 def _extract_startups_from_page(page: Page) -> list[dict]:
@@ -234,48 +264,21 @@ def _extract_startups_from_page(page: Page) -> list[dict]:
 def _go_to_next_page(page: Page) -> bool:
     """Tenta di andare alla pagina successiva usando la paginazione Wicket."""
     try:
-        # Find current page number (shown as <em>N</em> in the bottom navigator)
-        current_em = page.query_selector("span.navigatorBottom em, .navigatorBottom em, em")
-        if not current_em:
-            # Try alternative: look for em inside navigator area
-            current_em = page.query_selector("div[id*='navigatorBottom'] em")
+        # The site marks the current page as <a disabled title="Go to page N"><span>N</span></a>
+        # and the "next" arrow as <a rel="next" href="...navigatorBottom-next" ...>
+        next_link = page.query_selector("a[rel='next'][href*='navigatorBottom-next']")
+        if next_link:
+            logger.info("Click pulsante pagina successiva...")
+            next_link.click(force=True)
+            _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                _random_delay(2, 3)
+            return True
 
-        if current_em:
-            current_num = int(current_em.inner_text().strip())
-            next_num = current_num + 1
-            logger.info(f"Pagina corrente: {current_num}, prossima: {next_num}")
-
-            # Click the next page link
-            next_link = page.query_selector(f"a[href*='navigatorBottom-navigation']:has-text('{next_num}')")
-            if not next_link:
-                # Try clicking ">" arrow link
-                next_link = page.query_selector("a[href*='navigatorBottom-navigation-next']")
-
-            if next_link and next_link.is_visible():
-                next_link.click(force=True)
-                _random_delay(2, 4)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                except Exception:
-                    pass
-                return True
-            else:
-                logger.info("Nessun link alla pagina successiva trovato - ultima pagina raggiunta.")
-                return False
-
-        # Fallback: look for any "next" style link in bottom navigator
-        next_links = page.query_selector_all("a[href*='navigatorBottom']")
-        if next_links:
-            # The last link should be "next" or last page
-            last_link = next_links[-1]
-            if last_link.is_visible():
-                last_link.click(force=True)
-                _random_delay(2, 4)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                except Exception:
-                    pass
-                return True
+        logger.info("Nessun link 'next' trovato - ultima pagina raggiunta.")
+        return False
 
     except Exception as e:
         logger.debug(f"Errore navigazione pagina: {e}")
@@ -284,8 +287,13 @@ def _go_to_next_page(page: Page) -> bool:
     return False
 
 
-def scrape_startups(headless: bool = False) -> list[dict]:
+def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dict]:
     """Funzione principale di scraping."""
+    region_key = region.strip().lower()
+    if region_key not in REGIONI:
+        raise ValueError(f"Regione '{region}' non valida. Valori: {', '.join(sorted(REGIONI))}")
+    region_value = REGIONI[region_key]
+
     all_startups = []
 
     with sync_playwright() as p:
@@ -328,7 +336,7 @@ def scrape_startups(headless: bool = False) -> list[dict]:
                 logger.warning("Form non trovato, provo comunque...")
 
             # 2. Setup filters and search (all via JS to avoid click interception)
-            _setup_filters_and_search(page)
+            _setup_filters_and_search(page, region_value=region_value)
 
             if not _wait_for_captcha(page):
                 return all_startups
@@ -339,12 +347,20 @@ def scrape_startups(headless: bool = False) -> list[dict]:
             page.screenshot(path="debug_after_search.png", full_page=True)
             logger.info(f"URL dopo ricerca: {page.url}")
 
-            # 3. Extract results
+            # 3. Extract results (deduplicate by Codice fiscale)
+            seen_cf: set[str] = set()
             page_num = 1
             while True:
                 logger.info(f"Pagina {page_num}...")
                 startups = _extract_startups_from_page(page)
-                all_startups.extend(startups)
+                for s in startups:
+                    cf = s.get("Codice fiscale", "")
+                    key = cf if cf else s.get("Denominazione", "")
+                    if key and key not in seen_cf:
+                        seen_cf.add(key)
+                        all_startups.append(s)
+                    elif key:
+                        logger.debug(f"Duplicato saltato: {key}")
 
                 if not _go_to_next_page(page):
                     break

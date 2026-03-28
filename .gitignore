@@ -172,6 +172,7 @@ cython_debug/
 cookies.json
 scraper.log
 *.xlsx
+*.csv
 debug_*.html
 debug_*.png
 api_calls.json
