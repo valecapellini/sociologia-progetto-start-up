@@ -45,9 +45,38 @@ DELAY_MAX = 4.0
 DELAY_PAGE_MIN = 4.0
 DELAY_PAGE_MAX = 7.0
 
+# Exponential backoff
+MAX_RETRIES = 5
+BACKOFF_BASE = 5.0   # first retry waits ~5-10 s
+BACKOFF_FACTOR = 2.0  # each subsequent retry doubles
+BACKOFF_JITTER = 0.3  # ±30 % jitter
+
 
 def _random_delay(min_sec=DELAY_MIN, max_sec=DELAY_MAX):
     time.sleep(random.uniform(min_sec, max_sec))
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Return a jittered exponential backoff delay for the given attempt (0-based)."""
+    base = BACKOFF_BASE * (BACKOFF_FACTOR ** attempt)
+    jitter = base * BACKOFF_JITTER
+    delay = random.uniform(base - jitter, base + jitter)
+    return delay
+
+
+def _is_access_denied(page: Page) -> bool:
+    """Return True if the current page is an Access Denied / rate-limit page."""
+    try:
+        title = page.title().lower()
+        if "access denied" in title:
+            return True
+        # Also check body text for short error pages
+        body = page.inner_text("body")
+        if len(body) < 500 and "access denied" in body.lower():
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _save_cookies(context: BrowserContext, path=COOKIES_FILE):
@@ -263,11 +292,13 @@ def _extract_startups_from_page(page: Page) -> list[dict]:
 
 def _go_to_next_page(page: Page) -> bool:
     """Tenta di andare alla pagina successiva usando la paginazione Wicket."""
-    try:
-        # The site marks the current page as <a disabled title="Go to page N"><span>N</span></a>
-        # and the "next" arrow as <a rel="next" href="...navigatorBottom-next" ...>
-        next_link = page.query_selector("a[rel='next'][href*='navigatorBottom-next']")
-        if next_link:
+    for attempt in range(MAX_RETRIES):
+        try:
+            next_link = page.query_selector("a[rel='next'][href*='navigatorBottom-next']")
+            if not next_link:
+                logger.info("Nessun link 'next' trovato - ultima pagina raggiunta.")
+                return False
+
             logger.info("Click pulsante pagina successiva...")
             next_link.click(force=True)
             _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
@@ -275,15 +306,23 @@ def _go_to_next_page(page: Page) -> bool:
                 page.wait_for_load_state("networkidle", timeout=20000)
             except Exception:
                 _random_delay(2, 3)
+
+            if _is_access_denied(page):
+                delay = _backoff_delay(attempt)
+                logger.warning(f"Access Denied sulla pagina successiva — attesa {delay:.0f}s (tentativo {attempt + 1}/{MAX_RETRIES})")
+                time.sleep(delay)
+                page.go_back(wait_until="domcontentloaded", timeout=30000)
+                _random_delay()
+                continue
+
             return True
 
-        logger.info("Nessun link 'next' trovato - ultima pagina raggiunta.")
-        return False
+        except Exception as e:
+            delay = _backoff_delay(attempt)
+            logger.warning(f"Errore navigazione pagina: {e} — attesa {delay:.0f}s (tentativo {attempt + 1}/{MAX_RETRIES})")
+            time.sleep(delay)
 
-    except Exception as e:
-        logger.debug(f"Errore navigazione pagina: {e}")
-
-    logger.info("Nessuna pagina successiva.")
+    logger.error("Navigazione pagina fallita dopo tutti i tentativi.")
     return False
 
 
@@ -319,10 +358,25 @@ def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dic
         page = context.new_page()
 
         try:
-            # 1. Navigate to search page
-            logger.info(f"Navigazione a {SEARCH_URL}...")
-            page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
-            _random_delay(2, 4)
+            # 1. Navigate to search page (with retries)
+            for attempt in range(MAX_RETRIES):
+                logger.info(f"Navigazione a {SEARCH_URL}...")
+                try:
+                    page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
+                    _random_delay(2, 4)
+                    if _is_access_denied(page):
+                        delay = _backoff_delay(attempt)
+                        logger.warning(f"Access Denied al caricamento — attesa {delay:.0f}s (tentativo {attempt + 1}/{MAX_RETRIES})")
+                        time.sleep(delay)
+                        continue
+                    break
+                except Exception as e:
+                    delay = _backoff_delay(attempt)
+                    logger.warning(f"Errore navigazione: {e} — attesa {delay:.0f}s (tentativo {attempt + 1}/{MAX_RETRIES})")
+                    time.sleep(delay)
+            else:
+                logger.error("Impossibile caricare la pagina di ricerca dopo tutti i tentativi.")
+                return all_startups
 
             if not _wait_for_captcha(page):
                 return all_startups
@@ -350,8 +404,25 @@ def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dic
             # 3. Extract results (deduplicate by Codice fiscale)
             seen_cf: set[str] = set()
             page_num = 1
+            consecutive_failures = 0
             while True:
                 logger.info(f"Pagina {page_num}...")
+
+                # Detect Access Denied before extracting
+                if _is_access_denied(page):
+                    if consecutive_failures >= MAX_RETRIES:
+                        logger.error("Troppe pagine Access Denied consecutive — interruzione.")
+                        break
+                    delay = _backoff_delay(consecutive_failures)
+                    logger.warning(f"Access Denied sulla pagina {page_num} — attesa {delay:.0f}s (tentativo {consecutive_failures + 1}/{MAX_RETRIES})")
+                    time.sleep(delay)
+                    consecutive_failures += 1
+                    # Reload current results page
+                    page.go_back(wait_until="domcontentloaded", timeout=30000)
+                    _random_delay()
+                    continue
+
+                consecutive_failures = 0
                 startups = _extract_startups_from_page(page)
                 for s in startups:
                     cf = s.get("Codice fiscale", "")
