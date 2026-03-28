@@ -1,6 +1,6 @@
 # Scraper Startup Italia — Registro Imprese
 
-Scarica i dati di tutte le startup innovative italiane da [startup.registroimprese.it](https://startup.registroimprese.it) e li esporta in un file Excel (`.xlsx`), filtrabili per **regione**.
+Scarica i dati di tutte le startup innovative italiane da [startup.registroimprese.it](https://startup.registroimprese.it) e li esporta in file Excel (`.xlsx`) e CSV (`.csv`), filtrabili per **regione**.
 
 ## Requisiti
 
