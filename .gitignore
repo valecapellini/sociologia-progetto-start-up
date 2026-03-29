@@ -177,6 +177,10 @@ debug_*.html
 debug_*.png
 api_calls.json
 
+# Liguria startup data example
+!dati/startup_liguria_20260329.csv
+!dati/startup_liguria_20260329.xlsx
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
@@ -214,3 +218,4 @@ api_calls.json
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.DS_Store

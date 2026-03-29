@@ -1,6 +1,7 @@
 import csv
 import logging
 from datetime import datetime
+from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
@@ -12,6 +13,8 @@ def export_to_excel(startups: list[dict], region: str = "liguria", output_dir: s
     if not startups:
         logger.warning("Nessuna startup da esportare.")
         return ""
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     region_title = region.strip().title()
 
