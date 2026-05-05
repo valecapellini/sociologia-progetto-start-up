@@ -1,0 +1,35 @@
+RAGIONE SOCIALE;Nome dell'impresa, senza SRL o Società a Responsabilità Limitata;
+WEBSITE;cercare se esiste un indirizzo di contatto, altrimenti pagina web, linkedin o website;
+REGIONE;Regione Italiana;
+COMUNE;Comune italiano;
+DATA;Data di registro dell'impresa;
+DATA-S;Data di registro nella sezione STARTUP;
+NACE;codice ATECO;
+TURNOVER;Se un intervallo indicare valore superiore;
+DIMENSIONE;Se un intervallo indicare valore superiore;
+CAPITALE;Se un intervallo indicare valore superiore;
+KEYWORDS;"Indicare tutte, separate da ;";
+R&S;Yes/No;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" e fa riferimento ai criteri per definire una startup"
+Qualified Team;Yes/No;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" e fa riferimento ai criteri per definire una startup"
+IP;Yes/No;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" e fa riferimento ai criteri per definire una startup"
+FEMALE;Yes/No/   ;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" ed è indicato dalle caselle il cui titolo è preceduto da ""predominantly"", se missing, lasciare vuoto"
+YOUNG;Yes/No/   ;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" ed è indicato dalle caselle il cui titolo è preceduto da ""predominantly"", se missing, lasciare vuoto"
+FOREIGN;Yes/No/   ;"questo dato si trova dopo aver cliccato su ""FIND OUT MORE"" ed è indicato dalle caselle il cui titolo è preceduto da ""predominantly"", se missing, lasciare vuoto"
+INCUBATOR;Yes/No;
+INCUBATOR NAME;;
+GEOGRAPHICALAREA;;"Indicare Italia se ci sono solo regioni Italiane; ""Italia;UE"" se ci sono anche paesi Europei; ""Italy;UE;NonUE"" se ci sono anche paesi non UE "
+STARTUP STAGE;Seed/Development/launch/Scale-up/Exit;"se più di uno, separare con ;"
+PRODUCT;Idea/prototype/ready/customer-first/in-the-market;"se più di uno, separare con ;"
+TEAM;toBeDetermined/Technical/business/defined;"se più di uno, separare con ;"
+CHANNEL (canale di vendita);directly/large-scale/e-commerce/agents;"se più di uno, separare con ;"
+FINANCE_TYPE;Yes/No;
+FINANCE_AMOUNT;Yes/No;
+FINANCE_DATE;Yes/No;
+FINANCE_INVESTORS;Yes/No;"se più di uno, separare con ;"
+LEGALREPRESENTATIVE;COGNOME E NOME;
+INTERESTS CUSTOMER;Yes/No;
+INTERESTS LENDER;Yes/No;
+INTEREST INCUBATOR;Yes/No;
+INTEREST UNIVERSITY;Yes/No;
+INTEREST BUSINESS;Yes/No;
+INTEREST TECHNICAL;Yes/No;

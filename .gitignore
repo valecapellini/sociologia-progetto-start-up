@@ -177,6 +177,11 @@ debug_*.html
 debug_*.png
 api_calls.json
 
+# Csv files in blueprint, serve as example header and header fields description
+!blueprint/startup-header.csv
+!blueprint/startup-header-description.csv
+!blueprint/startup-header&description.xlsx
+
 # Liguria startup data example
 !dati/startup_liguria_20260329.csv
 !dati/startup_liguria_20260329.xlsx
