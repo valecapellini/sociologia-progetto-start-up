@@ -591,11 +591,12 @@ def _download_filled_profile_csvs(
 
     startups_per_page = 10
     total_pages = (expected_total + startups_per_page - 1) // startups_per_page
-    DOWNLOADS_PER_SESSION = 6  # 6×2 title/download clicks + 1 search = 13 AJAX calls (limit ~19)
+    DOWNLOADS_PER_SESSION = 8  # 8×2 title/download clicks + 1 search = 17 AJAX calls (limit ~19)
 
     downloaded = 0
     skipped = 0
     current_page = 1
+    resume_card_idx = 0  # resume from this card index after a session-budget break
     downloads_in_session = 0
 
     while current_page <= total_pages and downloaded + skipped < expected_total:
@@ -638,7 +639,15 @@ def _download_filled_profile_csvs(
             card_info.append((idx, cf, name))
 
         # ── Phase 2: process each card, re-querying after each back navigation ──
+        page_fully_processed = True
         for card_idx, cf, name in card_info:
+            # Skip cards already processed before a session-budget break
+            if card_idx < resume_card_idx:
+                # Still need to check if file exists (for accurate skip count)
+                target_file = download_path / f"{cf}.csv" if cf else None
+                if target_file and target_file.exists():
+                    skipped += 1
+                continue
             target_file = download_path / f"{cf}.csv" if cf else None
 
             if target_file and target_file.exists():
@@ -652,8 +661,10 @@ def _download_filled_profile_csvs(
             if downloads_in_session >= DOWNLOADS_PER_SESSION:
                 logger.info(
                     f"Wicket session budget used ({downloads_in_session} downloads) "
-                    f"— will re-search for next batch"
+                    f"— will re-search to resume on same page"
                 )
+                resume_card_idx = card_idx + 1  # resume from next card
+                page_fully_processed = False
                 break
 
             logger.info(
@@ -741,10 +752,11 @@ def _download_filled_profile_csvs(
                 downloads_in_session = DOWNLOADS_PER_SESSION
                 break
 
-        # Move to next page — always fresh search (Wicket AJAX pagination is
-        # unreliable after any detail-page navigation)
-        downloads_in_session = 0  # trigger fresh search next iteration
-        current_page += 1
+        # Move to next page or re-search same page
+        if page_fully_processed:
+            resume_card_idx = 0
+            current_page += 1
+        downloads_in_session = 0  # always fresh search next iteration
 
     logger.info(
         f"CSV downloads finished: {downloaded} downloaded, "
