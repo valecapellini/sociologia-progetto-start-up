@@ -38,6 +38,11 @@ def main():
     parser.add_argument("--headless", action="store_true", help="Esegui senza finestra browser")
     parser.add_argument("--verbose", "-v", action="store_true", help="Output dettagliato")
     parser.add_argument("--output", "-o", default=".", help="Directory di output per il file Excel")
+    parser.add_argument(
+        "--filled-profile", "--fp",
+        action="store_true",
+        help="Filter only startups with a filled profile",
+    )
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -46,7 +51,11 @@ def main():
     logger.info(f"Avvio scraping startup - regione: {args.regione}")
 
     try:
-        startups = scrape_startups(region=args.regione, headless=args.headless)
+        startups = scrape_startups(
+            region=args.regione,
+            headless=args.headless,
+            filled_profile=args.filled_profile,
+        )
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)

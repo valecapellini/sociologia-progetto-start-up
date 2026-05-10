@@ -140,7 +140,7 @@ def _dismiss_overlays(page: Page):
     """)
 
 
-def _setup_filters_and_search(page: Page, region_value: str = "7"):
+def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profile: bool = False):
     """Configura filtri e avvia ricerca. Usa selettori stabili (name attr, non ID)."""
     logger.info("Configurazione filtri...")
 
@@ -157,6 +157,18 @@ def _setup_filters_and_search(page: Page, region_value: str = "7"):
         }
     """)
     _random_delay(1, 2)
+
+    # 1b. Check "Filled Profile" checkbox (optional)
+    if filled_profile:
+        logger.info("Selecting Filled Profile checkbox...")
+        page.evaluate("""
+            var cb = document.querySelector('input[name="filledProfileFld:chkFld"]');
+            if (cb && !cb.checked) {
+                cb.checked = true;
+                cb.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+        """)
+        _random_delay(1, 2)
 
     # 2. Select region - use name attribute for hidden input + Semantic UI dropdown
     logger.info(f"Seleziono regione (value={region_value})...")
@@ -498,7 +510,7 @@ def _get_current_page_number(page: Page) -> int:
     return 0
 
 
-def _do_fresh_search(page: Page, context: BrowserContext, region_value: str) -> bool:
+def _do_fresh_search(page: Page, context: BrowserContext, region_value: str, filled_profile: bool = False) -> bool:
     """Navigate to the search page, set up filters, submit. Returns True on success."""
     for attempt in range(MAX_RETRIES):
         logger.info(f"Navigazione a {SEARCH_URL}...")
@@ -528,7 +540,7 @@ def _do_fresh_search(page: Page, context: BrowserContext, region_value: str) -> 
     except Exception:
         pass
 
-    _setup_filters_and_search(page, region_value=region_value)
+    _setup_filters_and_search(page, region_value=region_value, filled_profile=filled_profile)
     if not _wait_for_captcha(page):
         return False
     _save_cookies(context)
@@ -546,7 +558,7 @@ def _do_fresh_search(page: Page, context: BrowserContext, region_value: str) -> 
     return True
 
 
-def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dict]:
+def scrape_startups(region: str = "liguria", headless: bool = False, filled_profile: bool = False) -> list[dict]:
     """Funzione principale di scraping.
 
     Uses a multi-pass strategy to work around Wicket's AJAX pagination limit
@@ -592,7 +604,7 @@ def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dic
         try:
             # ── Pass 1: Forward from page 1 ──────────────────────────
             logger.info("═══ Passo 1: paginazione in avanti da pagina 1 ═══")
-            if not _do_fresh_search(page, context, region_value):
+            if not _do_fresh_search(page, context, region_value, filled_profile=filled_profile):
                 return all_startups
 
             # Debug snapshot
@@ -609,7 +621,7 @@ def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dic
 
             # ── Pass 2: Backward from last page ──────────────────────
             logger.info("═══ Passo 2: paginazione inversa dall'ultima pagina ═══")
-            if not _do_fresh_search(page, context, region_value):
+            if not _do_fresh_search(page, context, region_value, filled_profile=filled_profile):
                 return all_startups
 
             if not _go_to_last_page(page):
@@ -637,7 +649,7 @@ def scrape_startups(region: str = "liguria", headless: bool = False) -> list[dic
                     f"═══ Passo {pass_num}: jump a pagina {target} ═══"
                 )
 
-                if not _do_fresh_search(page, context, region_value):
+                if not _do_fresh_search(page, context, region_value, filled_profile=filled_profile):
                     break
 
                 if not _jump_to_page(page, target):
