@@ -185,6 +185,8 @@ api_calls.json
 # Liguria startup data example
 !dati/startup_liguria_20260329.csv
 !dati/startup_liguria_20260329.xlsx
+!dati/all_startups.xlsx
+!dati/all_startups.csv
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
