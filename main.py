@@ -7,10 +7,12 @@ Uso:
     python main.py --regione liguria
     python main.py --regione lombardia --headless
     python main.py --regione veneto -v
+    python main.py --regione liguria --filled-profile
 """
 import argparse
 import logging
 import sys
+from datetime import datetime
 
 from scraper import scrape_startups, REGIONI
 from exporter import export_to_excel
@@ -51,10 +53,19 @@ def main():
     logger.info(f"Avvio scraping startup - regione: {args.regione}")
 
     try:
+        # Compute download directory if filled-profile is active
+        if args.filled_profile:
+            today = datetime.now().strftime("%Y%m%d")
+            region_slug = args.regione.strip().lower().replace(" ", "_").replace("'", "")
+            csv_dir = f"{args.output}/startup_{region_slug}_{today}_csv"
+        else:
+            csv_dir = None
+
         startups = scrape_startups(
             region=args.regione,
             headless=args.headless,
             filled_profile=args.filled_profile,
+            download_dir=csv_dir,
         )
     except ValueError as e:
         logger.error(str(e))

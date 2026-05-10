@@ -558,7 +558,202 @@ def _do_fresh_search(page: Page, context: BrowserContext, region_value: str, fil
     return True
 
 
-def scrape_startups(region: str = "liguria", headless: bool = False, filled_profile: bool = False) -> list[dict]:
+def _extract_cf_from_card(card) -> str:
+    """Extract Codice Fiscale from a search result card."""
+    rows = card.query_selector_all(".row.rowsmall")
+    for row in rows:
+        cols = row.query_selector_all("div[class*='wide column']")
+        if len(cols) >= 2:
+            label = cols[0].inner_text().strip()
+            value = cols[1].inner_text().strip()
+            if "codice fiscale" in label.lower():
+                return value
+    return ""
+
+
+def _download_filled_profile_csvs(
+    page: Page,
+    context: BrowserContext,
+    region_value: str,
+    download_dir: str,
+    expected_total: int,
+) -> int:
+    """Download CSV profile for each startup in the search results.
+
+    Processes results page-by-page: clicks each startup title, opens the
+    download dropdown on the detail page, clicks CSV, captures the download.
+    Handles Wicket AJAX limits with periodic fresh searches.
+
+    Returns the number of files downloaded.
+    """
+    download_path = Path(download_dir)
+    download_path.mkdir(parents=True, exist_ok=True)
+
+    startups_per_page = 10
+    total_pages = (expected_total + startups_per_page - 1) // startups_per_page
+    DOWNLOADS_PER_SESSION = 6  # 6×2 title/download clicks + 1 search = 13 AJAX calls (limit ~19)
+
+    downloaded = 0
+    skipped = 0
+    current_page = 1
+    downloads_in_session = 0
+
+    while current_page <= total_pages and downloaded + skipped < expected_total:
+        # Fresh search on first page or after Wicket stall
+        if downloads_in_session == 0:
+            logger.info(f"Fresh search for CSV downloads — target page {current_page}")
+            if not _do_fresh_search(page, context, region_value, filled_profile=True):
+                logger.error("Fresh search failed during CSV download phase")
+                break
+            if current_page > 1:
+                if not _jump_to_page(page, current_page):
+                    logger.warning(f"Could not jump to page {current_page}, trying next page...")
+                    # Fallback: paginate forward from page 1
+                    for _ in range(current_page - 1):
+                        if not _go_to_next_page(page):
+                            break
+            downloads_in_session = 0
+
+        # Get result cards on current page
+        CARD_SELECTOR = (
+            "div.twelve.wide.column.right.floated.rounded.bordered.bgwhite"
+        )
+        CARD_FALLBACK = "div.bgwhite:has(#title)"
+
+        cards = page.query_selector_all(CARD_SELECTOR)
+        if not cards:
+            cards = page.query_selector_all(CARD_FALLBACK)
+
+        if not cards:
+            logger.warning(f"No result cards found on page {current_page}")
+            break
+
+        # ── Phase 1: collect card info (CF, name, index) before any navigation ──
+        # This avoids detached-element errors after page.go_back()
+        card_info: list[tuple[int, str, str]] = []  # (index, cf, name)
+        for idx, card in enumerate(cards):
+            cf = _extract_cf_from_card(card)
+            title_link = card.query_selector("h5 a, #title a")
+            name = title_link.inner_text().strip() if title_link else ""
+            card_info.append((idx, cf, name))
+
+        # ── Phase 2: process each card, re-querying after each back navigation ──
+        for card_idx, cf, name in card_info:
+            target_file = download_path / f"{cf}.csv" if cf else None
+
+            if target_file and target_file.exists():
+                logger.info(
+                    f"[{downloaded + skipped + 1}/{expected_total}] {cf} "
+                    f"— already downloaded, skipping"
+                )
+                skipped += 1
+                continue
+
+            if downloads_in_session >= DOWNLOADS_PER_SESSION:
+                logger.info(
+                    f"Wicket session budget used ({downloads_in_session} downloads) "
+                    f"— will re-search for next batch"
+                )
+                break
+
+            logger.info(
+                f"[{downloaded + skipped + 1}/{expected_total}] "
+                f"Downloading CSV for: {name}"
+            )
+
+            # Re-query cards — previous references are stale after go_back()
+            cards = page.query_selector_all(CARD_SELECTOR)
+            if not cards:
+                cards = page.query_selector_all(CARD_FALLBACK)
+            if card_idx >= len(cards):
+                logger.warning(f"  Card {card_idx} no longer on page — skipping")
+                continue
+
+            title_link = cards[card_idx].query_selector("h5 a, #title a")
+            if not title_link:
+                logger.warning(f"  Title link not found for card {card_idx} — skipping")
+                continue
+
+            # Click title → detail page
+            title_link.click()
+            _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                _random_delay(2, 3)
+
+            # Open download dropdown and click CSV
+            download_icon = page.query_selector(
+                "#downloadPnl i.download.icon, #downloadPnl"
+            )
+            csv_link = page.query_selector(
+                "#downloadPnl a.item:has(i.file.excel), #downloadPnl #idf5"
+            )
+            if not csv_link:
+                # Fallback: first link in dropdown menu
+                csv_link = page.query_selector("#downloadPnl .menu a.item")
+
+            if download_icon and csv_link:
+                download_icon.click()
+                _random_delay(0.5, 1)
+
+                try:
+                    with page.expect_download(timeout=30000) as download_info:
+                        csv_link.click()
+
+                    download = download_info.value
+                    if cf:
+                        save_path = download_path / f"{cf}.csv"
+                    else:
+                        save_path = download_path / download.suggested_filename
+                    download.save_as(str(save_path))
+                    logger.info(f"  Saved: {save_path.name} ({save_path.stat().st_size} bytes)")
+                    downloaded += 1
+                    downloads_in_session += 1
+                except Exception as dl_err:
+                    logger.warning(
+                        f"  Download failed (likely Wicket AJAX limit): {dl_err}"
+                    )
+                    # Force re-search for next batch
+                    downloads_in_session = DOWNLOADS_PER_SESSION
+            else:
+                logger.warning(f"  Download elements not found for {name}")
+                try:
+                    Path(f"debug_download_{cf or 'unknown'}.html").write_text(
+                        page.content()
+                    )
+                except Exception:
+                    pass
+
+            # Back to results
+            page.go_back()
+            _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                _random_delay(2, 3)
+
+            if _is_access_denied(page):
+                delay = _backoff_delay(0)
+                logger.warning(f"Access denied during download — waiting {delay:.0f}s")
+                time.sleep(delay)
+                # Force re-search
+                downloads_in_session = DOWNLOADS_PER_SESSION
+                break
+
+        # Move to next page — always fresh search (Wicket AJAX pagination is
+        # unreliable after any detail-page navigation)
+        downloads_in_session = 0  # trigger fresh search next iteration
+        current_page += 1
+
+    logger.info(
+        f"CSV downloads finished: {downloaded} downloaded, "
+        f"{skipped} skipped → {download_path}"
+    )
+    return downloaded
+
+
+def scrape_startups(region: str = "liguria", headless: bool = False, filled_profile: bool = False, download_dir: str | None = None) -> list[dict]:
     """Funzione principale di scraping.
 
     Uses a multi-pass strategy to work around Wicket's AJAX pagination limit
@@ -671,6 +866,19 @@ def scrape_startups(region: str = "liguria", headless: bool = False, filled_prof
                     break
 
             logger.info(f"Scraping completato: {len(all_startups)} startup in {pass_num} passi")
+
+            # ── CSV download phase (only when filled_profile=True and download_dir is set) ──
+            if filled_profile and download_dir and all_startups:
+                try:
+                    logger.info("=" * 60)
+                    logger.info(f"Starting CSV profile downloads to: {download_dir}")
+                    logger.info("=" * 60)
+                    downloaded = _download_filled_profile_csvs(
+                        page, context, region_value, download_dir, len(all_startups)
+                    )
+                    logger.info(f"Downloaded {downloaded} CSV files")
+                except Exception as e:
+                    logger.error(f"Error during CSV downloads: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"Errore scraping: {e}", exc_info=True)
