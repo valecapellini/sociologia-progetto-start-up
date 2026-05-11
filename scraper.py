@@ -145,7 +145,6 @@ def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profil
     logger.info("Configurazione filtri...")
 
     _dismiss_overlays(page)
-    _random_delay()
 
     # 1. Check startup checkbox - use name attribute (stable across page loads)
     logger.info("Seleziono checkbox Startup...")
@@ -156,7 +155,7 @@ def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profil
             cb.dispatchEvent(new Event('change', {bubbles: true}));
         }
     """)
-    _random_delay(1, 2)
+    _random_delay(0.3, 0.6)
 
     # 1b. Check "Filled Profile" checkbox (optional)
     if filled_profile:
@@ -168,16 +167,14 @@ def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profil
                 cb.dispatchEvent(new Event('change', {bubbles: true}));
             }
         """)
-        _random_delay(1, 2)
+        _random_delay(0.3, 0.6)
 
     # 2. Select region - use name attribute for hidden input + Semantic UI dropdown
     logger.info(f"Seleziono regione (value={region_value})...")
     page.evaluate(f"""
-        // Find the region hidden input by name (stable)
         var input = document.querySelector('input[name="regionFld:contenitore:supplierSel"]');
         if (input) {{
             input.value = '{region_value}';
-            // Find the parent Semantic UI dropdown and use its API
             var dropdown = input.closest('.ui.dropdown');
             if (dropdown && typeof $ !== 'undefined') {{
                 $(dropdown).dropdown('set selected', '{region_value}');
@@ -185,20 +182,17 @@ def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profil
             input.dispatchEvent(new Event('change', {{bubbles: true}}));
         }}
     """)
-    _random_delay(2, 3)
+    _random_delay(0.5, 1)
 
-    # 3. Submit via clicking the search button link (find by class/text, not ID)
+    # 3. Submit via clicking the search button link
     logger.info("Invio ricerca...")
     _dismiss_overlays(page)
 
     page.evaluate("""
-        // Find search button by its stable characteristics
         var searchBtn = document.querySelector('a[id*="searchBtnVetrina"], a.searchBtnVetrina');
         if (!searchBtn) {
-            // Fallback: find by the hidden submit input name
             var hiddenSubmit = document.querySelector('input[name="searchBtn"]');
             if (hiddenSubmit) {
-                // The actual clickable button is referenced in the onclick
                 var match = hiddenSubmit.getAttribute('onclick');
                 if (match) {
                     var idMatch = match.match(/getElementById\\('([^']+)'\\)/);
@@ -211,18 +205,20 @@ def _setup_filters_and_search(page: Page, region_value: str = "7", filled_profil
         if (searchBtn) {
             searchBtn.click();
         } else {
-            // Last resort: submit the form
             var form = document.querySelector('form.ui.form.styled');
             if (form) form.submit();
         }
     """)
 
-    # Wait for results to load via AJAX
-    _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
+    # Wait for results to load — use selector instead of networkidle
     try:
-        page.wait_for_load_state("networkidle", timeout=30000)
+        page.wait_for_selector(
+            "div.twelve.wide.column.right.floated.rounded.bordered.bgwhite",
+            timeout=15000,
+        )
+        _random_delay(0.5, 1)
     except Exception:
-        _random_delay(3, 5)
+        _random_delay(2, 3)
 
 
 def _extract_startups_from_page(page: Page) -> list[dict]:
@@ -516,7 +512,7 @@ def _do_fresh_search(page: Page, context: BrowserContext, region_value: str, fil
         logger.info(f"Navigazione a {SEARCH_URL}...")
         try:
             page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
-            _random_delay(2, 4)
+            _random_delay(1, 2)
             if _is_access_denied(page):
                 delay = _backoff_delay(attempt)
                 logger.warning(f"Access Denied al caricamento — attesa {delay:.0f}s")
@@ -595,11 +591,12 @@ def _download_filled_profile_csvs(
 
     downloaded = 0
     skipped = 0
+    processed_cfs: set[str] = set()  # track unique processed CFs (prevents double-counting)
     current_page = 1
     resume_card_idx = 0  # resume from this card index after a session-budget break
     downloads_in_session = 0
 
-    while current_page <= total_pages and downloaded + skipped < expected_total:
+    while current_page <= total_pages and len(processed_cfs) < expected_total:
         # Fresh search on first page or after Wicket stall
         if downloads_in_session == 0:
             logger.info(f"Fresh search for CSV downloads — target page {current_page}")
@@ -643,19 +640,21 @@ def _download_filled_profile_csvs(
         for card_idx, cf, name in card_info:
             # Skip cards already processed before a session-budget break
             if card_idx < resume_card_idx:
-                # Still need to check if file exists (for accurate skip count)
-                target_file = download_path / f"{cf}.csv" if cf else None
-                if target_file and target_file.exists():
-                    skipped += 1
+                continue  # already counted in a previous session on this page
+
+            # Skip if this CF was already processed from another page/session
+            if cf and cf in processed_cfs:
                 continue
+
             target_file = download_path / f"{cf}.csv" if cf else None
 
             if target_file and target_file.exists():
                 logger.info(
-                    f"[{downloaded + skipped + 1}/{expected_total}] {cf} "
+                    f"[{len(processed_cfs) + 1}/{expected_total}] {cf} "
                     f"— already downloaded, skipping"
                 )
                 skipped += 1
+                processed_cfs.add(cf)
                 continue
 
             if downloads_in_session >= DOWNLOADS_PER_SESSION:
@@ -663,12 +662,12 @@ def _download_filled_profile_csvs(
                     f"Wicket session budget used ({downloads_in_session} downloads) "
                     f"— will re-search to resume on same page"
                 )
-                resume_card_idx = card_idx + 1  # resume from next card
+                resume_card_idx = card_idx  # resume from THIS card (the unprocessed one)
                 page_fully_processed = False
                 break
 
             logger.info(
-                f"[{downloaded + skipped + 1}/{expected_total}] "
+                f"[{len(processed_cfs) + 1}/{expected_total}] "
                 f"Downloading CSV for: {name}"
             )
 
@@ -678,18 +677,24 @@ def _download_filled_profile_csvs(
                 cards = page.query_selector_all(CARD_FALLBACK)
             if card_idx >= len(cards):
                 logger.warning(f"  Card {card_idx} no longer on page — skipping")
+                skipped += 1
+                if cf:
+                    processed_cfs.add(cf)
                 continue
 
             title_link = cards[card_idx].query_selector("h5 a, #title a")
             if not title_link:
                 logger.warning(f"  Title link not found for card {card_idx} — skipping")
+                skipped += 1
+                if cf:
+                    processed_cfs.add(cf)
                 continue
 
             # Click title → detail page
             title_link.click()
-            _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
             try:
-                page.wait_for_load_state("networkidle", timeout=20000)
+                page.wait_for_selector("#downloadPnl", timeout=15000)
+                _random_delay(0.3, 0.6)
             except Exception:
                 _random_delay(2, 3)
 
@@ -721,14 +726,22 @@ def _download_filled_profile_csvs(
                     logger.info(f"  Saved: {save_path.name} ({save_path.stat().st_size} bytes)")
                     downloaded += 1
                     downloads_in_session += 1
+                    if cf:
+                        processed_cfs.add(cf)
                 except Exception as dl_err:
                     logger.warning(
                         f"  Download failed (likely Wicket AJAX limit): {dl_err}"
                     )
+                    skipped += 1
+                    if cf:
+                        processed_cfs.add(cf)
                     # Force re-search for next batch
                     downloads_in_session = DOWNLOADS_PER_SESSION
             else:
                 logger.warning(f"  Download elements not found for {name}")
+                skipped += 1
+                if cf:
+                    processed_cfs.add(cf)
                 try:
                     Path(f"debug_download_{cf or 'unknown'}.html").write_text(
                         page.content()
@@ -738,9 +751,12 @@ def _download_filled_profile_csvs(
 
             # Back to results
             page.go_back()
-            _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
             try:
-                page.wait_for_load_state("networkidle", timeout=20000)
+                page.wait_for_selector(
+                    "div.twelve.wide.column.right.floated.rounded.bordered.bgwhite",
+                    timeout=15000,
+                )
+                _random_delay(0.3, 0.6)
             except Exception:
                 _random_delay(2, 3)
 
@@ -748,7 +764,7 @@ def _download_filled_profile_csvs(
                 delay = _backoff_delay(0)
                 logger.warning(f"Access denied during download — waiting {delay:.0f}s")
                 time.sleep(delay)
-                # Force re-search
+                resume_card_idx = card_idx  # resume from current card
                 downloads_in_session = DOWNLOADS_PER_SESSION
                 break
 
@@ -760,7 +776,7 @@ def _download_filled_profile_csvs(
 
     logger.info(
         f"CSV downloads finished: {downloaded} downloaded, "
-        f"{skipped} skipped → {download_path}"
+        f"{skipped} skipped, {len(processed_cfs)} unique → {download_path}"
     )
     return downloaded
 
