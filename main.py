@@ -39,7 +39,7 @@ def main():
     )
     parser.add_argument("--headless", action="store_true", help="Esegui senza finestra browser")
     parser.add_argument("--verbose", "-v", action="store_true", help="Output dettagliato")
-    parser.add_argument("--output", "-o", default=".", help="Directory di output per il file Excel")
+    parser.add_argument("--output", "-o", default="dati", help="Directory di output per il file Excel")
     parser.add_argument(
         "--filled-profile", "--fp",
         action="store_true",
