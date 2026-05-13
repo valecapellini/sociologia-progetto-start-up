@@ -311,12 +311,22 @@ def _go_to_next_page(page: Page) -> bool:
                 return False
 
             logger.info("Click pulsante pagina successiva...")
+            prev_page = _get_current_page_number(page) or 0
             next_link.click(force=True)
             _random_delay(DELAY_PAGE_MIN, DELAY_PAGE_MAX)
             try:
                 page.wait_for_load_state("networkidle", timeout=20000)
             except Exception:
                 _random_delay(2, 3)
+
+            # Detect Wicket stall: page number didn't change
+            new_page = _get_current_page_number(page) or 0
+            if new_page and prev_page and new_page <= prev_page:
+                logger.warning(
+                    f"Wicket stall detected: page stayed at {new_page} "
+                    f"(was {prev_page}) — AJAX session exhausted"
+                )
+                return False
 
             if _is_access_denied(page):
                 delay = _backoff_delay(attempt)
@@ -430,7 +440,7 @@ def _jump_to_page(page: Page, target: int) -> bool:
     pages, this function hops through intermediate page links.
     Each hop costs one Wicket AJAX call.
     """
-    max_hops = 8
+    max_hops = 50  # enough for ~100 pages (25 × ~4 pages/hop)
     for _ in range(max_hops):
         # Detect current page number (the disabled link in pagination)
         current = _get_current_page_number(page)
@@ -591,7 +601,7 @@ def _download_filled_profile_csvs(
 
     downloaded = 0
     skipped = 0
-    processed_cfs: set[str] = set()  # track unique processed CFs (prevents double-counting)
+    processed_cfs: set = set()  # track unique processed CFs (prevents double-counting)
     current_page = 1
     resume_card_idx = 0  # resume from this card index after a session-budget break
     downloads_in_session = 0
@@ -605,11 +615,10 @@ def _download_filled_profile_csvs(
                 break
             if current_page > 1:
                 if not _jump_to_page(page, current_page):
-                    logger.warning(f"Could not jump to page {current_page}, trying next page...")
-                    # Fallback: paginate forward from page 1
-                    for _ in range(current_page - 1):
-                        if not _go_to_next_page(page):
-                            break
+                    logger.warning(f"Could not jump to page {current_page}, skipping this page")
+                    current_page += 1
+                    downloads_in_session = 0
+                    continue
             downloads_in_session = 0
 
         # Get result cards on current page
@@ -628,7 +637,7 @@ def _download_filled_profile_csvs(
 
         # ── Phase 1: collect card info (CF, name, index) before any navigation ──
         # This avoids detached-element errors after page.go_back()
-        card_info: list[tuple[int, str, str]] = []  # (index, cf, name)
+        card_info: list = []  # (index, cf, name)
         for idx, card in enumerate(cards):
             cf = _extract_cf_from_card(card)
             title_link = card.query_selector("h5 a, #title a")
@@ -781,7 +790,7 @@ def _download_filled_profile_csvs(
     return downloaded
 
 
-def scrape_startups(region: str = "liguria", headless: bool = False, filled_profile: bool = False, download_dir: str | None = None) -> list[dict]:
+def scrape_startups(region: str = "liguria", headless: bool = False, filled_profile: bool = False, download_dir = None) -> list:
     """Funzione principale di scraping.
 
     Uses a multi-pass strategy to work around Wicket's AJAX pagination limit
@@ -797,7 +806,7 @@ def scrape_startups(region: str = "liguria", headless: bool = False, filled_prof
     region_value = REGIONI[region_key]
 
     all_startups = []
-    seen_cf: set[str] = set()
+    seen_cf: set = set()
 
     MAX_PASSES = 10
     CONSECUTIVE_DUP_PAGES_LIMIT = 3  # stop direction after N all-dup pages
@@ -928,8 +937,8 @@ def scrape_startups(region: str = "liguria", headless: bool = False, filled_prof
 def _paginate_and_collect(
     page: Page,
     context: BrowserContext,
-    all_startups: list[dict],
-    seen_cf: set[str],
+    all_startups: list,
+    seen_cf: set,
     direction: str = "forward",
 ) -> int:
     """Paginate in the given direction, collecting unique startups.
