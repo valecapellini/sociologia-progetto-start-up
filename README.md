@@ -155,17 +155,4 @@ MIT
 - ✓ Simulare browser reale (User-Agent)
 - ✓ Attendere tempi realistici tra richieste
 - ✓ Mantenere cookie e sessioni
-- ✓ Gestire timeouts e riconeessioni
-
-## Criteri di Accettazione
-
-- [ ] Almeno 1 startup della Liguria raccolte
-- [ ] File Excel generato e apribile
-- [ ] Tutti i campi visibili presenti
-- [ ] Esecuzione senza errori critici
-- [ ] Delays appropriati (non abusivi)
-- [ ] Completamento in tempo (< 3 ore)
-
----
-
-Questa specifica è **technology-agnostic**: non prescrive se usare Node.js o Python, Puppeteer o Selenium, etc. Descrive solo **cosa** il sistema deve fare e **come** deve comportarsi.
+- ✓ Gestire timeouts e riconnessioni
