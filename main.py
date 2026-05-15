@@ -45,6 +45,17 @@ def main():
         action="store_true",
         help="Filter only startups with a filled profile",
     )
+    parser.add_argument(
+        "--resume-page",
+        type=int,
+        default=1,
+        help="Resume scraping from this page number (1-based)",
+    )
+    parser.add_argument(
+        "--province",
+        nargs="+",
+        help="Only process these province codes (e.g. --province NA SA)",
+    )
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -66,6 +77,8 @@ def main():
             headless=args.headless,
             filled_profile=args.filled_profile,
             download_dir=csv_dir,
+            resume_page=args.resume_page,
+            only_provinces=[c.upper() for c in args.province] if args.province else None,
         )
     except ValueError as e:
         logger.error(str(e))

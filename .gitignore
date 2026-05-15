@@ -170,9 +170,11 @@ cython_debug/
 
 # Project-specific
 cookies.json
+cookies.json.*
 scraper.log
 *.xlsx
 *.csv
+dati/*.zip
 debug_*.html
 debug_*.png
 api_calls.json

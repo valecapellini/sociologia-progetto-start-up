@@ -1,158 +1,110 @@
 # Scraper Startup Italia — Registro Imprese
 
-Scarica i dati di tutte le startup innovative italiane da [startup.registroimprese.it](https://startup.registroimprese.it) e li esporta in file Excel (`.xlsx`) e CSV (`.csv`), filtrabili per **regione**.
+Scraper Playwright per esportare le startup innovative dal portale del Registro Imprese, con supporto a filtri per regione, profilo compilato e province selezionate.
 
 ## Requisiti
 
-- **Python 3.9+** (già installato su macOS; su Windows scaricalo da [python.org](https://www.python.org/downloads/))
-- Connessione internet
+- Python 3.9+
+- connessione internet
+- Chromium installato tramite Playwright
 
-## Installazione (una sola volta)
-
-Apri il Terminale (macOS) o il Prompt dei comandi (Windows), entra nella cartella del progetto e esegui:
+## Installazione
 
 ```bash
-# Crea un ambiente virtuale
 python3 -m venv venv
-
-# Attivalo
-# macOS / Linux:
 source venv/bin/activate
-# Windows:
-# venv\Scripts\activate
-
-# Installa le dipendenze
 pip install -r requirements.txt
-
-# Installa il browser Chromium usato dallo scraper
 playwright install chromium
 ```
 
-## Uso
+Se non attivi l'ambiente virtuale, usa `./venv/bin/python` al posto di `python`.
+
+## Uso rapido
 
 ```bash
-# Attiva l'ambiente virtuale (se non già attivo)
-source venv/bin/activate   # macOS/Linux
-# venv\Scripts\activate    # Windows
+source venv/bin/activate
 
-# Scarica le startup della Liguria (default)
+# Regione default: liguria
 python main.py
 
-# Scarica le startup di un'altra regione
-python main.py --regione lombardia
-python main.py --regione veneto
-python main.py --regione emilia-romagna
+# Regione esplicita
+python main.py --regione campania
 
-# Opzioni aggiuntive
-python main.py --regione liguria --verbose      # Log dettagliato
-python main.py --regione liguria --headless      # Senza finestra browser
-python main.py --regione liguria --output ./dati # Salva nella cartella "dati"
+# Solo startup con profilo compilato
+python main.py --regione campania --filled-profile
+
+# Solo alcune province
+python main.py --regione campania --filled-profile --province NA SA
+
+# Senza finestra browser
+python main.py --regione campania --filled-profile --headless
+
+# Riprendi da una pagina specifica
+python main.py --regione campania --resume-page 20
+
+# Log dettagliato
+python main.py --regione campania --filled-profile -v
 ```
 
-### Regioni disponibili
+## Opzioni CLI
 
-Abruzzo, Basilicata, Calabria, Campania, Emilia-Romagna, Friuli-Venezia Giulia,
-Lazio, Liguria, Lombardia, Marche, Molise, Piemonte, Puglia, Sardegna, Sicilia,
-Toscana, Trentino-Alto Adige, Umbria, Valle d'Aosta, Veneto.
-
-## CAPTCHA
-
-Il sito può mostrare un CAPTCHA di verifica. Quando succede:
-
-1. Lo script si **ferma automaticamente** e mostra un avviso nel terminale.
-2. **Risolvi il CAPTCHA** manualmente nella finestra del browser che si è aperta.
-3. Lo script **riprende da solo** dopo la risoluzione.
-
-Alla prima esecuzione è quasi certo che venga chiesto; le esecuzioni successive usano i cookie salvati e in genere non lo richiedono più.
+- `--regione`, `-r`: regione da scaricare
+- `--headless`: esegue Chromium senza UI
+- `--verbose`, `-v`: abilita log dettagliato
+- `--output`, `-o`: directory di output, default `dati`
+- `--filled-profile`, `--fp`: limita la ricerca alle startup con profilo compilato e abilita il download del CSV di dettaglio per ogni startup
+- `--resume-page`: riparte da una pagina 1-based
+- `--province`: limita l'esecuzione ad alcune province, ad esempio `--province NA SA`
 
 ## Output
 
-Lo script genera due file nella directory corrente (o in quella specificata con `--output`):
+Ogni esecuzione genera un export aggregato nella directory di output:
 
-- **`.xlsx`** (Excel formattato con header blu, colonne auto-sized)
-- **`.csv`** (UTF-8 con BOM, apribile in Excel su Windows)
+- `startup_<regione>_<data>.xlsx`
+- `startup_<regione>_<data>.csv`
 
-Esempi di nomi file:
+Quando usi `--filled-profile`, i CSV di dettaglio delle singole startup vengono salvati in:
+
+- `dati/startup_<regione>_<data>_csv/`
+
+## Esecuzione robusta per regioni grandi
+
+Per regioni molto grandi o quando il sito inizia a bloccare le sessioni, usa il wrapper:
+
+```bash
+source venv/bin/activate
+./run_scraper.sh NA SA
 ```
-startup_liguria_20260328.xlsx
-startup_liguria_20260328.csv
-startup_lombardia_20260328.xlsx
-startup_lombardia_20260328.csv
-...
-```
 
-Colonne estratte per ogni startup:
+Il wrapper:
 
-| Colonna | Esempio |
-|---|---|
-| Denominazione | CLARITY STUDIO S.R.L. |
-| Codice fiscale | 02879810998 |
-| Natura giuridica | SOCIETÀ A RESPONSABILITÀ LIMITATA |
-| Comune | GENOVA (GE) |
-| Codice Ateco | 621000 |
-| Classe Valore della Produzione | 1-100K euro |
-| Classe di Addetti | non disponibile |
-| Classe di Capitale | 5K-10K euro |
-| Costituzione Impresa | 06/04/2023 |
-| Sezione Startup | 14/04/2023 |
-| Tag | Web, AI, DESIGN |
+- riavvia automaticamente lo scraper dopo crash o blocchi del browser
+- conta i CSV già scaricati e continua dal progresso attuale
+- aumenta il cooldown quando un run non produce nuovi CSV
+
+## Come lavora lo scraper
+
+- usa Playwright con Chromium e cookie persistenti
+- divide automaticamente per provincia le regioni molto grandi
+- scarica i risultati aggregati in Excel/CSV
+- con `--filled-profile` apre le schede delle startup e salva il CSV di dettaglio
+
+## Note operative
+
+- il sito può mostrare CAPTCHA o blocchi anti-bot: quando succede, conviene aspettare e rilanciare
+- i cookie vengono salvati in `cookies.json`
+- i file generati in `dati/` e i log locali sono esclusi dal versionamento
 
 ## Struttura del progetto
 
-```
-main.py          # Punto di ingresso (CLI)
-scraper.py       # Logica di scraping (Playwright)
-exporter.py      # Export in Excel (openpyxl)
-requirements.txt # Dipendenze Python
+```text
+main.py          CLI
+scraper.py       logica Playwright e navigazione
+exporter.py      export Excel/CSV
+run_scraper.sh   wrapper di restart per run lunghi
+requirements.txt dipendenze Python
 ```
 
 ## Licenza
 
 MIT
-- Logging degli errori
-
-## Requisiti Non-Funzionali
-
-| Requisito | Valore |
-|-----------|--------|
-| Tempo max completamento | < 3 ore |
-| Memoria max | < 500 MB |
-| User-Agent | Realistico (browser) |
-| Delay tra richieste | ≥ 1 sec |
-| Affidabilità | Completamento indipendente dal numero risultati |
-
-## Flusso Principale
-
-```
-1. Naviga a homepage
-2. Seleziona "Startup" + ricerca avanzata
-3. Filtra Regione = Liguria
-4. Esegui ricerca
-5. LOOP pagine:
-   - Estrai dati da pagina corrente
-   - Se pagina successiva → vai a  pagina successiva
-   - Altrimenti → esci
-6. Esporta dati in Excel
-7. Salva file
-8. Notifica completamento
-```
-
-## Dati da Estrarre
-
-| Campo | Obbligatorio |
-|-------|-------------|
-| Denominazione | ✓ |
-| Settori | ✓ |
-| Tag/Keywords | ✓ |
-| Data Aggiornamento | ✓ |
-| Ubicazione (se presente) | ✗ |
-| Descrizione (se presente) | ✗ |
-
-+ Qualsiasi altro campo presente nella ricerca
-
-## Gestione Vincoli Tecnici
-
-- ✓ Simulare browser reale (User-Agent)
-- ✓ Attendere tempi realistici tra richieste
-- ✓ Mantenere cookie e sessioni
-- ✓ Gestire timeouts e riconnessioni
